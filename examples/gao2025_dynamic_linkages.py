@@ -80,12 +80,13 @@ def simulate_streamflow(precip: pd.DataFrame, weight: pd.Series, m: int) -> pd.S
         "recharge_proxy": 0.3 * np.exp(-np.arange(m) / 15),
     }
 
-    discharge = np.zeros(n + m)
+    discharge = np.zeros(n)
     for name, kernel in kernels.items():
         series = precip[name].to_numpy()
-        discharge[: n + m] += np.convolve(series, kernel, mode="full")[: n + m]
+        convolved = np.convolve(series, kernel, mode="full")
+        # Take only the first n elements to match the discharge array size
+        discharge += convolved[:n]
 
-    discharge = discharge[:n]
     discharge += 0.1 * rng.standard_normal(n)
     discharge *= weight.to_numpy() / weight.mean()
 

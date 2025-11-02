@@ -85,11 +85,12 @@ def simulate_discharge(precip: pd.DataFrame, m: int) -> pd.Series:
         "fractured_bedrock": 0.45 * np.exp(-np.arange(m) / 12.0),
     }
 
-    discharge = np.zeros(n + m)
+    discharge = np.zeros(n)
     for col, kernel in kernels.items():
-        discharge[: n + m] += np.convolve(precip[col].to_numpy(), kernel, mode="full")[: n + m]
+        convolved = np.convolve(precip[col].to_numpy(), kernel, mode="full")
+        # Take only the first n elements to match the discharge array size
+        discharge += convolved[:n]
 
-    discharge = discharge[:n]
     noise = 0.15 * np.random.default_rng(2024).standard_normal(n)
     discharge += noise
     return pd.Series(discharge, index=precip.index, name="discharge")
