@@ -7,15 +7,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import os
 
 import pandas as pd
 
 if __package__ is None or __package__ == "":
     # Allow running the script via ``python example.py``
     sys.path.append(str(Path(__file__).resolve().parent))
-    from erra import erra  # type: ignore
+    from erra import erra, plot_erra_results  # type: ignore
 else:
-    from .erra import erra
+    from .erra import erra, plot_erra_results
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "demonstration-scripts" / "Source data"
@@ -26,8 +27,12 @@ def main() -> None:
 
     使用仓库自带的示例数据运行一次简易 ERRA 分析。"""
 
+    # Get script name for figure naming
+    script_name = Path(__file__).stem  # Gets 'example' from 'example.py'
+    figures_dir = Path(__file__).resolve().parent / "figures"
+
     dataset = DATA_DIR / "MOPEX SacoR hourly.txt"
-    df = pd.read_csv(dataset, delim_whitespace=True)
+    df = pd.read_csv(dataset, sep=r'\s+')  # Using newer pandas syntax
 
     result = erra(
         p=df[["p"]],
@@ -45,6 +50,18 @@ def main() -> None:
     print(result.rrd.head())
     print("标准误差 / standard errors:")
     print(result.stderr.head())
+    
+    # Generate comprehensive plots using the new plotting function
+    plot_erra_results(
+        result=result,
+        observed_q=df["q"],
+        output_dir=figures_dir,
+        filename_prefix=script_name,
+        show_plots=True,
+        save_plots=True,
+        figsize=(10, 6),
+        dpi=300
+    )
 
 
 if __name__ == "__main__":
