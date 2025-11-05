@@ -21,7 +21,7 @@ rainfall-runoff analysis, including support for:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Literal, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -113,7 +113,9 @@ def erra(
     agg: int = 1,
     labels: Optional[Sequence[str]] = None,
     xknots: Optional[np.ndarray | list] = None,
-    xknot_type: Literal["values", "percentiles", "cumsum", "sqsum", "even"] = "percentiles",
+    xknot_type: Literal[
+        "values", "percentiles", "cumsum", "sqsum", "even"
+    ] = "percentiles",
     show_top_xknot: bool = False,
     split_params: Optional[Dict] = None,
     robust: bool = False,
@@ -377,9 +379,6 @@ def erra(
     p_matrix, col_labels = _prepare_precipitation(p, labels)
     q_vec = _to_numpy(q)
 
-    # Store original q for later use
-    q_original = q_vec.copy()
-
     # Apply aggregation if requested
     if agg > 1:
         p_matrix, q_vec, wt = _aggregate(p_matrix, q_vec, wt, agg)
@@ -457,7 +456,9 @@ def erra(
         )
 
         # Create labels for NRF columns
-        nrf_labels = create_nrf_labels(col_labels[:n_drivers_original], xknot_values_full, show_top_xknot)
+        nrf_labels = create_nrf_labels(
+            col_labels[:n_drivers_original], xknot_values_full, show_top_xknot
+        )
 
         # Create DataFrames
         nrf = _to_rrd_dataframe(nrf_array, nrf_labels)
@@ -467,8 +468,9 @@ def erra(
         # (Proper error propagation would require covariance matrices)
         nrf_stderr = _to_rrd_dataframe(stderr, nrf_labels)
         stderr_df = _to_rrd_dataframe(
-            np.sqrt(np.mean(stderr**2, axis=1, keepdims=True)) * np.ones((stderr.shape[0], n_drivers_original)),
-            col_labels[:n_drivers_original]
+            np.sqrt(np.mean(stderr**2, axis=1, keepdims=True))
+            * np.ones((stderr.shape[0], n_drivers_original)),
+            col_labels[:n_drivers_original],
         )
 
     else:
@@ -726,7 +728,9 @@ def _solve_rrd_robust(
         if mad < 1e-10:
             break  # Converged or degenerate
 
-        scaled_resid = residuals / (1.4826 * mad)  # 1.4826 makes MAD consistent with std for normal
+        scaled_resid = residuals / (
+            1.4826 * mad
+        )  # 1.4826 makes MAD consistent with std for normal
 
         # Huber weights: 1 for |r| <= k, k/|r| for |r| > k
         # Using k=1.345 (standard choice for 95% efficiency)

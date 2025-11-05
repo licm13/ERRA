@@ -14,6 +14,14 @@ from typing import TYPE_CHECKING, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+try:
+    import matplotlib.pyplot as plt
+    from scipy import stats
+
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
+
 if TYPE_CHECKING:
     from .erra_core import ERRAResult
 
@@ -54,19 +62,15 @@ def plot_erra_results(
     use_chinese : bool, optional
         Whether to include Chinese text in plots / 是否在图中包含中文文本
     """
-    try:
-        import matplotlib.pyplot as plt
-        from scipy import stats
-
-        # Configure matplotlib for Chinese fonts if needed
-        if use_chinese:
-            _configure_chinese_fonts()
-
-    except ImportError as e:
+    if not PLOTTING_AVAILABLE:
         raise ImportError(
             "matplotlib and scipy are required for plotting. "
             "Install with: pip install matplotlib scipy"
-        ) from e
+        )
+
+    # Configure matplotlib for Chinese fonts if needed
+    if use_chinese:
+        _configure_chinese_fonts()
 
     if save_plots:
         if output_dir is None:
@@ -103,7 +107,14 @@ def plot_erra_results(
 
     # 3. Residuals analysis / 残差分析
     _plot_residuals_analysis(
-        result, output_dir, filename_prefix, figsize, dpi, show_plots, save_plots, use_chinese
+        result,
+        output_dir,
+        filename_prefix,
+        figsize,
+        dpi,
+        show_plots,
+        save_plots,
+        use_chinese,
     )
 
     # 4. Broken-stick representation (if available)
@@ -157,14 +168,19 @@ def _configure_chinese_fonts():
 
 
 def _plot_rrd_with_error_bars(
-    result, output_dir, filename_prefix, figsize, dpi, show_plots, save_plots, use_chinese
+    result,
+    output_dir,
+    filename_prefix,
+    figsize,
+    dpi,
+    show_plots,
+    save_plots,
+    use_chinese,
 ):
     """Plot RRD with error bars.
 
     绘制带误差棒的RRD。
     """
-    import matplotlib.pyplot as plt
-
     plt.figure(figsize=figsize)
 
     for col in result.rrd.columns:
@@ -183,7 +199,9 @@ def _plot_rrd_with_error_bars(
     if use_chinese:
         plt.xlabel("Lag (time units) / 时滞 (时间单位)")
         plt.ylabel("RRD Coefficient / RRD系数")
-        plt.title("Runoff Response Distribution with Error Bars\n径流响应分布 (带误差棒)")
+        plt.title(
+            "Runoff Response Distribution with Error Bars\n径流响应分布 (带误差棒)"
+        )
     else:
         plt.xlabel("Lag (time units)")
         plt.ylabel("RRD Coefficient")
@@ -208,14 +226,20 @@ def _plot_rrd_with_error_bars(
 
 
 def _plot_fitted_vs_observed(
-    result, observed_q, output_dir, filename_prefix, figsize, dpi, show_plots, save_plots, use_chinese
+    result,
+    observed_q,
+    output_dir,
+    filename_prefix,
+    figsize,
+    dpi,
+    show_plots,
+    save_plots,
+    use_chinese,
 ):
     """Plot fitted vs observed discharge.
 
     绘制拟合值与观测值对比图。
     """
-    import matplotlib.pyplot as plt
-
     if isinstance(observed_q, pd.Series):
         observed_q = observed_q.values
 
@@ -231,7 +255,10 @@ def _plot_fitted_vs_observed(
         fitted_label = "Fitted / 拟合值"
         observed_label = "Observed / 观测值"
         ylabel = "Discharge / 流量"
-        title1 = f"Fitted vs Observed Discharge (First {plot_length} points)\n拟合值与观测值对比 (前{plot_length}个点)"
+        title1 = (
+            f"Fitted vs Observed Discharge (First {plot_length} points)\n"
+            f"拟合值与观测值对比 (前{plot_length}个点)"
+        )
     else:
         fitted_label = "Fitted"
         observed_label = "Observed"
@@ -311,15 +338,19 @@ def _plot_fitted_vs_observed(
 
 
 def _plot_residuals_analysis(
-    result, output_dir, filename_prefix, figsize, dpi, show_plots, save_plots, use_chinese
+    result,
+    output_dir,
+    filename_prefix,
+    figsize,
+    dpi,
+    show_plots,
+    save_plots,
+    use_chinese,
 ):
     """Plot residuals analysis.
 
     绘制残差分析图。
     """
-    import matplotlib.pyplot as plt
-    from scipy import stats
-
     plt.figure(figsize=(figsize[0] * 1.2, figsize[1] * 1.3))
 
     # Time series of residuals
@@ -392,20 +423,29 @@ def _plot_residuals_analysis(
 
 
 def _plot_broken_stick(
-    result, output_dir, filename_prefix, figsize, dpi, show_plots, save_plots, use_chinese
+    result,
+    output_dir,
+    filename_prefix,
+    figsize,
+    dpi,
+    show_plots,
+    save_plots,
+    use_chinese,
 ):
     """Plot broken-stick representation.
 
     绘制断棍表示图。
     """
-    import matplotlib.pyplot as plt
-
     plt.figure(figsize=figsize)
 
     # Plot original RRD
     for col in result.rrd.columns:
         plt.plot(
-            result.lags, result.rrd[col].values, "-", alpha=0.6, label=f"Original RRD {col}"
+            result.lags,
+            result.rrd[col].values,
+            "-",
+            alpha=0.6,
+            label=f"Original RRD {col}",
         )
 
     # Plot broken-stick representation
