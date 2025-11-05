@@ -19,7 +19,8 @@ try:
     from scipy import stats
 
     PLOTTING_AVAILABLE = True
-except ImportError:
+except ModuleNotFoundError:
+    # More specific than ImportError - only catches missing packages
     PLOTTING_AVAILABLE = False
 
 if TYPE_CHECKING:

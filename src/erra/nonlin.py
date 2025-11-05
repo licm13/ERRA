@@ -165,10 +165,11 @@ def create_xprime_matrix(
         for seg_idx in range(n_segments):
             k_lower = kpts[seg_idx]
             k_upper = kpts[seg_idx + 1]
+            interval_width = k_upper - k_lower
 
             # Calculate x-prime for this segment
             # x'[seg] = max(0, min(p - k_lower, interval_width))
-            xp_col = np.maximum(0, np.minimum(p_col - k_lower, k_upper - k_lower))
+            xp_col = np.maximum(0, np.minimum(p_col - k_lower, interval_width))
 
             col_idx = driver_idx * n_segments + seg_idx
             xprime[:, col_idx] = xp_col
