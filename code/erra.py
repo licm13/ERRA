@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Iterable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
+from scipy.sparse import csr_matrix, spmatrix
 
 
 @dataclass
@@ -259,22 +261,44 @@ def _build_design_matrix(
     q: np.ndarray,
     wt: np.ndarray,
     m: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    *,
+    sparse_output: bool = False,
+    sparse_format: str = "csr",
+) -> Tuple[Union[np.ndarray, spmatrix], np.ndarray, np.ndarray]:
     """Construct the regression matrix with lags up to ``m``.
 
-    根据最大时滞 ``m`` 构建设计矩阵，并删除包含缺测值的行。"""
+    根据最大时滞 ``m`` 构建设计矩阵，并删除包含缺测值的行。
+
+    Parameters
+    ----------
+    p, q, wt : np.ndarray
+        Input precipitation, discharge and weights aligned along the first axis.
+    m : int
+        Maximum lag included in the design matrix.
+    sparse_output : bool, optional
+        If ``True``, return the design matrix as a SciPy sparse matrix to reduce
+        memory usage when ``m`` or the number of drivers is large.
+    sparse_format : {"csr", "csc"}, optional
+        Sparse matrix format used when ``sparse_output`` is enabled.
+    """
 
     n, k = p.shape
-    cols = k * (m + 1)
-    design = np.zeros((n, cols), dtype=float)
+    if m < 0:
+        raise ValueError("m must be non-negative")
 
-    for lag in range(m + 1):
-        shifted = np.roll(p, shift=lag, axis=0)
-        shifted[:lag, :] = np.nan
-        design[:, lag * k : (lag + 1) * k] = shifted
+    # Prepend ``m`` rows of NaNs so that the sliding window view naturally
+    # generates lagged blocks without explicit Python loops.
+    padded = np.vstack([np.full((m, k), np.nan, dtype=float), p])
+    windows = sliding_window_view(padded, window_shape=m + 1, axis=0)
+    # ``windows`` has shape (n, k, m+1); swap axes so that consecutive lags sit
+    # along the second dimension and reshape into blocks of (m + 1) * k columns.
+    lag_blocks = np.swapaxes(windows, 1, 2)[:, ::-1, :]
 
-    valid = (~np.isnan(design).any(axis=1)) & (~np.isnan(q))
-    design = design[valid]
+    valid = (~np.isnan(lag_blocks).any(axis=(1, 2))) & (~np.isnan(q))
+    if not valid.any():
+        raise ValueError("No valid rows remain after removing NaNs")
+
+    design_dense = lag_blocks[valid].reshape(-1, (m + 1) * k)
     response = q[valid]
     weights = wt[valid]
 
@@ -285,7 +309,17 @@ def _build_design_matrix(
     else:
         weights = weights / mean_w
 
-    return design, response, weights
+    if not sparse_output:
+        return design_dense, response, weights
+
+    if sparse_format == "csr":
+        design_sparse: spmatrix = csr_matrix(design_dense)
+    elif sparse_format == "csc":
+        design_sparse = csr_matrix(design_dense).tocsc()
+    else:
+        raise ValueError("sparse_format must be either 'csr' or 'csc'")
+
+    return design_sparse, response, weights
 
 
 def _tikhonov_matrix(size: int) -> np.ndarray:
