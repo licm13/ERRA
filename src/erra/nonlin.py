@@ -27,6 +27,38 @@ _MIN_PRECIPITATION_VALUE = 0  # Exclude zero precipitation in knot calculations
 _EPSILON_WEIGHT = 1e-10  # Small value to prevent division by zero
 
 
+def _percentiles_from_sorted(sorted_values: np.ndarray, percentiles: np.ndarray) -> np.ndarray:
+    """Interpolate percentile values from a sorted sample."""
+
+    if sorted_values.size == 0:
+        raise ValueError("Cannot compute percentiles of an empty array")
+
+    percentiles = np.clip(percentiles, 0.0, 100.0)
+    if sorted_values.size == 1:
+        return np.full(percentiles.shape, sorted_values[0], dtype=float)
+
+    ranks = percentiles / 100.0 * (sorted_values.size - 1)
+    return np.interp(ranks, np.arange(sorted_values.size), sorted_values)
+
+
+def _values_from_cumulative(
+    sorted_values: np.ndarray, cumulative: np.ndarray, percentiles: np.ndarray
+) -> np.ndarray:
+    """Return values corresponding to percentiles of a cumulative distribution."""
+
+    if cumulative.size == 0:
+        raise ValueError("Cannot compute cumulative percentiles of an empty array")
+
+    total = cumulative[-1]
+    if total <= 0:
+        return np.zeros_like(percentiles, dtype=float)
+
+    targets = np.clip(percentiles, 0.0, 100.0) * total / 100.0
+    indices = np.searchsorted(cumulative, targets, side="left")
+    indices = np.clip(indices, 0, sorted_values.size - 1)
+    return sorted_values[indices]
+
+
 def create_xprime_matrix(
     p: np.ndarray,
     xknots: np.ndarray,
@@ -104,88 +136,80 @@ def create_xprime_matrix(
     # Calculate actual knot values based on type
     knot_values = np.zeros((n_xknots + 2, n_drivers))  # +2 for min and max
 
+    sorted_columns: List[np.ndarray] = []
+    cumulative_columns: List[np.ndarray] = []
+    cumulative_sq_columns: List[np.ndarray] = []
+    max_values = np.max(p, axis=0)
+
     for i in range(n_drivers):
         p_col = p[:, i]
-        p_nonzero = p_col[p_col > _MIN_PRECIPITATION_VALUE]  # Exclude zeros
-
-        if len(p_nonzero) == 0:
+        positive = p_col[p_col > _MIN_PRECIPITATION_VALUE]
+        if positive.size == 0:
             raise ValueError(f"Driver {i} has no positive values")
 
+        sorted_col = np.sort(positive)
+        sorted_columns.append(sorted_col)
+        cumulative_columns.append(np.cumsum(sorted_col))
+        cumulative_sq_columns.append(np.cumsum(sorted_col**2))
+
+    for i in range(n_drivers):
         if xknot_type == "values":
-            # Direct values
             kpts = xknots[:, i]
         elif xknot_type == "percentiles":
-            # Percentiles of p
-            kpts = np.percentile(p_nonzero, xknots[:, i])
+            kpts = _percentiles_from_sorted(sorted_columns[i], xknots[:, i])
         elif xknot_type == "cumsum":
-            # Percentiles of cumulative sum
-            p_sorted = np.sort(p_nonzero)
-            cumsum = np.cumsum(p_sorted)
-            kpts = []
-            for pct in xknots[:, i]:
-                target = cumsum[-1] * pct / 100
-                idx = np.argmin(np.abs(cumsum - target))
-                kpts.append(p_sorted[idx])
-            kpts = np.array(kpts)
+            kpts = _values_from_cumulative(
+                sorted_columns[i], cumulative_columns[i], xknots[:, i]
+            )
         elif xknot_type == "sqsum":
-            # Percentiles of cumulative sum of squares
-            p_sorted = np.sort(p_nonzero)
-            cumsum_sq = np.cumsum(p_sorted**2)
-            kpts = []
-            for pct in xknots[:, i]:
-                target = cumsum_sq[-1] * pct / 100
-                idx = np.argmin(np.abs(cumsum_sq - target))
-                kpts.append(p_sorted[idx])
-            kpts = np.array(kpts)
+            kpts = _values_from_cumulative(
+                sorted_columns[i], cumulative_sq_columns[i], xknots[:, i]
+            )
         elif xknot_type == "even":
-            # Evenly spaced (xknots should specify [n_knots, min_points])
-            # For simplicity, use regular percentiles
-            # Full implementation would ensure min_points in each interval
             n_knots = int(xknots[0, i])
             percentiles = np.linspace(0, 100, n_knots + 2)[1:-1]
-            kpts = np.percentile(p_nonzero, percentiles)
+            kpts = _percentiles_from_sorted(sorted_columns[i], percentiles)
         else:
             raise ValueError(f"Unknown xknot_type: {xknot_type}")
 
-        # Add min (0) and max
-        knot_values[:, i] = np.concatenate([[0], kpts, [np.max(p_col)]])
+        max_val = max_values[i]
+        kpts = np.clip(kpts, 0.0, max_val)
+        kpts = np.maximum.accumulate(kpts)
+        knot_values[:, i] = np.concatenate([[0.0], kpts, [max_val]])
 
     # Create x-prime matrix
     # For each driver and each knot interval, create an x-prime column
     n_segments = n_xknots + 1  # Number of intervals between knots
-    xprime = np.zeros((n_timesteps, n_drivers * n_segments))
+    lower_bounds = knot_values[:-1].T  # (n_drivers, n_segments)
+    upper_bounds = knot_values[1:].T
+    interval_width = upper_bounds - lower_bounds
 
-    # Calculate segment-weighted means
-    seg_wtd_meanx = np.zeros((n_segments, n_drivers))
+    p_expanded = p[:, :, None]
+    xprime = np.clip(
+        p_expanded - lower_bounds[None, :, :], 0.0, interval_width[None, :, :]
+    )
 
-    for driver_idx in range(n_drivers):
-        p_col = p[:, driver_idx]
-        kpts = knot_values[:, driver_idx]
+    # Calculate segment-weighted means using vectorised operations
+    in_segment = (p_expanded > lower_bounds[None, :, :]) & (
+        p_expanded <= upper_bounds[None, :, :]
+    )
+    weighted_sum = np.sum(np.where(in_segment, p_expanded**2, 0.0), axis=0)
+    weight = np.sum(np.where(in_segment, p_expanded, 0.0), axis=0)
 
-        for seg_idx in range(n_segments):
-            k_lower = kpts[seg_idx]
-            k_upper = kpts[seg_idx + 1]
-            interval_width = k_upper - k_lower
+    with np.errstate(invalid="ignore", divide="ignore"):
+        seg_wtd_mean = np.divide(
+            weighted_sum,
+            weight,
+            out=np.zeros_like(weighted_sum),
+            where=weight > _EPSILON_WEIGHT,
+        )
 
-            # Calculate x-prime for this segment
-            # x'[seg] = max(0, min(p - k_lower, interval_width))
-            xp_col = np.maximum(0, np.minimum(p_col - k_lower, interval_width))
+    fallback = 0.5 * (lower_bounds + upper_bounds)
+    empty_mask = weight <= _EPSILON_WEIGHT
+    seg_wtd_mean[empty_mask] = fallback[empty_mask]
 
-            col_idx = driver_idx * n_segments + seg_idx
-            xprime[:, col_idx] = xp_col
-
-            # Calculate weighted mean precipitation in this segment
-            in_segment = (p_col > k_lower) & (p_col <= k_upper)
-            if np.any(in_segment):
-                # Weight by precipitation intensity
-                p_in_seg = p_col[in_segment]
-                seg_wtd_meanx[seg_idx, driver_idx] = np.sum(p_in_seg**2) / np.sum(
-                    p_in_seg
-                )
-            else:
-                seg_wtd_meanx[seg_idx, driver_idx] = (k_lower + k_upper) / 2
-
-    return xprime, knot_values, seg_wtd_meanx
+    xprime_matrix = xprime.reshape(n_timesteps, n_drivers * n_segments)
+    return xprime_matrix, knot_values, seg_wtd_mean.T
 
 
 def betaprime_to_nrf(
