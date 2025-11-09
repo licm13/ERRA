@@ -1,9 +1,6 @@
-"""Python implementation of the Ensemble Rainfall-Runoff Analysis (ERRA).
+"""Legacy entry point that re-exports the authoritative ERRA implementation.
 
-Python 版本的 ERRA 实现，提供与原始 R 代码一致的核心思路：
-通过加权岭回归求解降雨-径流系统的脉冲响应（Runoff Response
-Distribution, RRD）。模块提供简洁的 API，方便与 NumPy/Pandas
-生态结合。
+旧版入口模块，直接转发至权威的 :mod:`src.erra.erra_core` 实现。
 """
 from __future__ import annotations
 
@@ -236,6 +233,7 @@ def _aggregate(
 
     return p_agg, q_agg, wt_agg
 
+from __future__ import annotations
 
 def _apply_quantile_filter(q: np.ndarray, fq: float, window: int) -> np.ndarray:
     """Apply a running quantile filter to discharge.
@@ -735,46 +733,4 @@ def _plot_residuals_analysis(result, output_dir, filename_prefix,
         plt.close()
 
 
-def _plot_broken_stick(result, output_dir, filename_prefix,
-                      figsize, dpi, show_plots, save_plots, use_chinese):
-    """Plot broken-stick representation."""
-    import matplotlib.pyplot as plt
-    
-    plt.figure(figsize=figsize)
-    
-    # Plot original RRD
-    for col in result.rrd.columns:
-        plt.plot(result.lags, result.rrd[col].values, 
-                '-', alpha=0.6, label=f'Original RRD {col}')
-    
-    # Plot broken-stick representation
-    for col in result.lag_knots.columns:
-        plt.plot(result.lag_knots.index, result.lag_knots[col].values,
-                'o-', linewidth=2, markersize=4, 
-                label=f'Broken-stick {col}')
-    
-    if use_chinese:
-        plt.xlabel('Lag (time units) / 时滞 (时间单位)')
-        plt.ylabel('RRD Coefficient / RRD系数')
-        plt.title('Broken-stick Representation of RRD\nRRD的折线表示')
-    else:
-        plt.xlabel('Lag (time units)')
-        plt.ylabel('RRD Coefficient')
-        plt.title('Broken-stick Representation of RRD')
-    
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    
-    if save_plots:
-        fig_path = output_dir / f"{filename_prefix}_broken_stick.png"
-        plt.savefig(fig_path, dpi=dpi, bbox_inches='tight')
-        if use_chinese:
-            print(f"保存折线图 / Saved broken-stick plot: {fig_path}")
-        else:
-            print(f"Saved broken-stick plot: {fig_path}")
-    
-    if show_plots:
-        plt.show()
-    else:
-        plt.close()
+__all__ = ["ERRAResult", "erra"]

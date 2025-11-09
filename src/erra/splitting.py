@@ -281,13 +281,13 @@ def make_split_sets(
 
             if bin_num == 0:
                 lower = -np.inf
-                upper = bp_vals[0] if len(bp_vals) > 0 else np.inf
-            elif bin_num == len(bp_vals):
-                lower = bp_vals[-1]
+                upper = breakpoint_values_current[0] if len(breakpoint_values_current) > 0 else np.inf
+            elif bin_num == len(breakpoint_values_current):
+                lower = breakpoint_values_current[-1]
                 upper = np.inf
             else:
-                lower = bp_vals[bin_num - 1]
-                upper = bp_vals[bin_num]
+                lower = breakpoint_values_current[bin_num - 1]
+                upper = breakpoint_values_current[bin_num]
 
             criteria_row[f"{crit_label[i]}_lower"] = lower
             criteria_row[f"{crit_label[i]}_upper"] = upper

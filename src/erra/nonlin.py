@@ -114,7 +114,7 @@ def create_xprime_matrix(
     knot_values : np.ndarray
         Actual knot values used (including min and max)
         实际使用的节点值（包括最小值和最大值）
-    seg_wtd_meanx : np.ndarray
+    segment_weighted_mean_precip : np.ndarray
         Segment-weighted mean precipitation in each interval
         每个区间中段加权平均降水
     """
@@ -215,7 +215,7 @@ def create_xprime_matrix(
 def betaprime_to_nrf(
     betaprime: np.ndarray,
     knot_values: np.ndarray,
-    seg_wtd_meanx: np.ndarray,
+    segment_weighted_mean_precip: np.ndarray,
     n_drivers: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Convert β' (beta-prime) coefficients to NRF (Nonlinear Response Functions).
@@ -244,7 +244,7 @@ def betaprime_to_nrf(
     knot_values : np.ndarray
         Knot values including min and max, shape (n_knots+2, n_drivers)
         包括最小值和最大值的节点值，形状 (n_knots+2, n_drivers)
-    seg_wtd_meanx : np.ndarray
+    segment_weighted_mean_precip : np.ndarray
         Segment-weighted mean precipitation, shape (n_segments, n_drivers)
         段加权平均降水，形状 (n_segments, n_drivers)
     n_drivers : int
@@ -292,7 +292,7 @@ def betaprime_to_nrf(
         bp_end = (driver_idx + 1) * n_segments
 
         # Weight by segment-weighted mean precipitation
-        weights = seg_wtd_meanx[:, driver_idx]
+        weights = segment_weighted_mean_precip[:, driver_idx]
         weights = weights / (np.sum(weights) + _EPSILON_WEIGHT)  # Normalize
 
         for lag_idx in range(m_plus_1):

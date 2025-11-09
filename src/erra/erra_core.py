@@ -30,6 +30,15 @@ from scipy.sparse import csr_matrix, spmatrix
 
 from .nonlin import betaprime_to_nrf, create_nrf_labels, create_xprime_matrix
 from .splitting import make_split_sets, validate_split_params
+from .utils_core import (
+    aggregate_time_series,
+    apply_quantile_filter,
+    build_design_matrix,
+    convert_to_numpy_array,
+    prepare_precipitation_matrix,
+    solve_rrd,
+    to_rrd_dataframe,
+)
 
 
 @dataclass
@@ -378,18 +387,18 @@ def erra(
     ... )
     """
     # Prepare inputs
-    p_matrix, col_labels = _prepare_precipitation(p, labels)
-    q_vec = _convert_to_numpy_array(q)
+    p_matrix, col_labels = prepare_precipitation_matrix(p, labels)
+    q_vec = convert_to_numpy_array(q)
 
     # Apply aggregation if requested
     if agg > 1:
-        p_matrix, q_vec, wt = _aggregate(p_matrix, q_vec, wt, agg)
+        p_matrix, q_vec, wt = aggregate_time_series(p_matrix, q_vec, wt, agg)
 
     # Handle weights
     if wt is None:
         wt_vec = np.ones_like(q_vec, dtype=float)
     else:
-        wt_vec = _convert_to_numpy_array(wt)
+        wt_vec = convert_to_numpy_array(wt)
         if len(wt_vec) != len(q_vec):
             raise ValueError("weights must have the same length as q")
 
@@ -406,14 +415,18 @@ def erra(
 
     # Apply nonlinear transformation if requested
     xknot_values_full = None
-    seg_wtd_meanx = None
+    segment_weighted_mean_precip = None
     nrf = None
     nrf_stderr = None
     is_nonlinear = xknots is not None
 
     if is_nonlinear:
         xknots_arr = np.asarray(xknots, dtype=float)
-        p_xprime, xknot_values_full, seg_wtd_meanx = create_xprime_matrix(
+        (
+            p_xprime,
+            xknot_values_full,
+            segment_weighted_mean_precip,
+        ) = create_xprime_matrix(
             p_matrix, xknots_arr, xknot_type
         )
         # Update p_matrix to x-prime matrix
@@ -424,10 +437,10 @@ def erra(
         n_drivers_original = p_matrix.shape[1]
 
     # Apply quantile filter to discharge
-    q_filtered = _apply_quantile_filter(q_vec, fq, window=4 * m + 1)
+    q_filtered = apply_quantile_filter(q_vec, fq, window=4 * m + 1)
 
     # Build design matrix
-    design, response, weights = _build_design_matrix(p_matrix, q_filtered, wt_vec, m)
+    design, response, weights = build_design_matrix(p_matrix, q_filtered, wt_vec, m)
 
     # Solve regression (with optional robust estimation)
     if robust:
@@ -442,7 +455,7 @@ def erra(
             tolerance=robust_tolerance,
         )
     else:
-        beta, stderr, fitted, residuals = _solve_rrd(
+        beta, stderr, fitted, residuals = solve_rrd(
             design, response, weights, nu, m, p_matrix.shape[1]
         )
 
@@ -454,7 +467,10 @@ def erra(
         # beta and stderr are currently for x-prime
         # Convert to NRF at knots
         nrf_array, rrd_array = betaprime_to_nrf(
-            beta, xknot_values_full, seg_wtd_meanx, n_drivers_original
+            beta,
+            xknot_values_full,
+            segment_weighted_mean_precip,
+            n_drivers_original,
         )
 
         # Create labels for NRF columns
@@ -463,21 +479,21 @@ def erra(
         )
 
         # Create DataFrames
-        nrf = _to_rrd_dataframe(nrf_array, nrf_labels)
-        rrd_df = _to_rrd_dataframe(rrd_array, col_labels[:n_drivers_original])
+        nrf = to_rrd_dataframe(nrf_array, nrf_labels)
+        rrd_df = to_rrd_dataframe(rrd_array, col_labels[:n_drivers_original])
 
         # For now, use NRF stderr as approximation
         # (Proper error propagation would require covariance matrices)
-        nrf_stderr = _to_rrd_dataframe(stderr, nrf_labels)
-        stderr_df = _to_rrd_dataframe(
+        nrf_stderr = to_rrd_dataframe(stderr, nrf_labels)
+        stderr_df = to_rrd_dataframe(
             np.sqrt(np.mean(stderr**2, axis=1, keepdims=True))
             * np.ones((stderr.shape[0], n_drivers_original)),
             col_labels[:n_drivers_original],
         )
 
     else:
-        rrd_df = _to_rrd_dataframe(beta, col_labels)
-        stderr_df = _to_rrd_dataframe(stderr, col_labels)
+        rrd_df = to_rrd_dataframe(beta, col_labels)
+        stderr_df = to_rrd_dataframe(stderr, col_labels)
 
     # Compute broken-stick representation if requested
     knots = None
@@ -752,7 +768,7 @@ def _solve_rrd_robust(
     通过基于残差使用 Huber 权重迭代降低异常值的权重来实现鲁棒回归。
     """
     # Start with OLS solution
-    beta, stderr, fitted, residuals = _solve_rrd(design, response, weights, nu, m, k)
+    beta, stderr, fitted, residuals = solve_rrd(design, response, weights, nu, m, k)
 
     rob_weights = np.ones_like(weights)
 
@@ -778,7 +794,7 @@ def _solve_rrd_robust(
         combined_weights = weights * rob_weights
 
         # Re-solve with new weights
-        beta_new, stderr, fitted, residuals = _solve_rrd(
+        beta_new, stderr, fitted, residuals = solve_rrd(
             design, response, combined_weights, nu, m, k
         )
 
@@ -790,17 +806,6 @@ def _solve_rrd_robust(
             break
 
     return beta, stderr, fitted, residuals
-
-
-def _to_rrd_dataframe(arr: np.ndarray, labels: Sequence[str]) -> pd.DataFrame:
-    """Convert coefficient array to DataFrame with bilingual headers.
-
-    将系数数组转换为带有双语标题的 DataFrame。
-    """
-    data = {label: arr[:, i] for i, label in enumerate(labels)}
-    df = pd.DataFrame(data)
-    df.index.name = "lag"
-    return df
 
 
 def _broken_stick(
