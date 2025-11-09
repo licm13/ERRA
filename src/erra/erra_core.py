@@ -28,6 +28,15 @@ import pandas as pd
 
 from .nonlin import betaprime_to_nrf, create_nrf_labels, create_xprime_matrix
 from .splitting import make_split_sets, validate_split_params
+from .utils_core import (
+    aggregate_time_series,
+    apply_quantile_filter,
+    build_design_matrix,
+    convert_to_numpy_array,
+    prepare_precipitation_matrix,
+    solve_rrd,
+    to_rrd_dataframe,
+)
 
 
 @dataclass
@@ -376,18 +385,18 @@ def erra(
     ... )
     """
     # Prepare inputs
-    p_matrix, col_labels = _prepare_precipitation(p, labels)
-    q_vec = _convert_to_numpy_array(q)
+    p_matrix, col_labels = prepare_precipitation_matrix(p, labels)
+    q_vec = convert_to_numpy_array(q)
 
     # Apply aggregation if requested
     if agg > 1:
-        p_matrix, q_vec, wt = _aggregate(p_matrix, q_vec, wt, agg)
+        p_matrix, q_vec, wt = aggregate_time_series(p_matrix, q_vec, wt, agg)
 
     # Handle weights
     if wt is None:
         wt_vec = np.ones_like(q_vec, dtype=float)
     else:
-        wt_vec = _convert_to_numpy_array(wt)
+        wt_vec = convert_to_numpy_array(wt)
         if len(wt_vec) != len(q_vec):
             raise ValueError("weights must have the same length as q")
 
@@ -404,14 +413,18 @@ def erra(
 
     # Apply nonlinear transformation if requested
     xknot_values_full = None
-    seg_wtd_meanx = None
+    segment_weighted_mean_precip = None
     nrf = None
     nrf_stderr = None
     is_nonlinear = xknots is not None
 
     if is_nonlinear:
         xknots_arr = np.asarray(xknots, dtype=float)
-        p_xprime, xknot_values_full, seg_wtd_meanx = create_xprime_matrix(
+        (
+            p_xprime,
+            xknot_values_full,
+            segment_weighted_mean_precip,
+        ) = create_xprime_matrix(
             p_matrix, xknots_arr, xknot_type
         )
         # Update p_matrix to x-prime matrix
@@ -422,10 +435,10 @@ def erra(
         n_drivers_original = p_matrix.shape[1]
 
     # Apply quantile filter to discharge
-    q_filtered = _apply_quantile_filter(q_vec, fq, window=4 * m + 1)
+    q_filtered = apply_quantile_filter(q_vec, fq, window=4 * m + 1)
 
     # Build design matrix
-    design, response, weights = _build_design_matrix(p_matrix, q_filtered, wt_vec, m)
+    design, response, weights = build_design_matrix(p_matrix, q_filtered, wt_vec, m)
 
     # Solve regression (with optional robust estimation)
     if robust:
@@ -440,7 +453,7 @@ def erra(
             tolerance=robust_tolerance,
         )
     else:
-        beta, stderr, fitted, residuals = _solve_rrd(
+        beta, stderr, fitted, residuals = solve_rrd(
             design, response, weights, nu, m, p_matrix.shape[1]
         )
 
@@ -452,7 +465,10 @@ def erra(
         # beta and stderr are currently for x-prime
         # Convert to NRF at knots
         nrf_array, rrd_array = betaprime_to_nrf(
-            beta, xknot_values_full, seg_wtd_meanx, n_drivers_original
+            beta,
+            xknot_values_full,
+            segment_weighted_mean_precip,
+            n_drivers_original,
         )
 
         # Create labels for NRF columns
@@ -461,21 +477,21 @@ def erra(
         )
 
         # Create DataFrames
-        nrf = _to_rrd_dataframe(nrf_array, nrf_labels)
-        rrd_df = _to_rrd_dataframe(rrd_array, col_labels[:n_drivers_original])
+        nrf = to_rrd_dataframe(nrf_array, nrf_labels)
+        rrd_df = to_rrd_dataframe(rrd_array, col_labels[:n_drivers_original])
 
         # For now, use NRF stderr as approximation
         # (Proper error propagation would require covariance matrices)
-        nrf_stderr = _to_rrd_dataframe(stderr, nrf_labels)
-        stderr_df = _to_rrd_dataframe(
+        nrf_stderr = to_rrd_dataframe(stderr, nrf_labels)
+        stderr_df = to_rrd_dataframe(
             np.sqrt(np.mean(stderr**2, axis=1, keepdims=True))
             * np.ones((stderr.shape[0], n_drivers_original)),
             col_labels[:n_drivers_original],
         )
 
     else:
-        rrd_df = _to_rrd_dataframe(beta, col_labels)
-        stderr_df = _to_rrd_dataframe(stderr, col_labels)
+        rrd_df = to_rrd_dataframe(beta, col_labels)
+        stderr_df = to_rrd_dataframe(stderr, col_labels)
 
     # Compute broken-stick representation if requested
     knots = None
@@ -513,196 +529,6 @@ _MAD_TO_STD_FACTOR = 1.4826  # Makes MAD consistent with std for normal distribu
 _HUBER_TUNING_CONSTANT = 1.345  # Standard choice for 95% efficiency
 
 
-def _convert_to_numpy_array(
-    arr: Sequence[float] | pd.Series | np.ndarray,
-) -> np.ndarray:
-    """Convert input to a 1-D NumPy array. / 转换为一维 NumPy 数组。"""
-    if isinstance(arr, np.ndarray):
-        return np.asarray(arr, dtype=float).ravel()
-    if isinstance(arr, pd.Series):
-        return arr.to_numpy(dtype=float)
-    return np.asarray(list(arr), dtype=float)
-
-
-def _prepare_precipitation(
-    p: Iterable[Sequence[float]] | pd.DataFrame | pd.Series | np.ndarray,
-    labels: Optional[Sequence[str]],
-) -> Tuple[np.ndarray, Sequence[str]]:
-    """Ensure precipitation input is a 2-D NumPy array.
-
-    保证降水输入为二维数组，并生成列名称。
-    """
-    if isinstance(p, pd.DataFrame):
-        matrix = p.to_numpy(dtype=float)
-        cols = list(p.columns)
-    elif isinstance(p, pd.Series):
-        matrix = p.to_numpy(dtype=float)[:, None]
-        cols = [p.name or "p1"]
-    else:
-        arr = np.asarray(p, dtype=float)
-        if arr.ndim == 1:
-            matrix = arr[:, None]
-        elif arr.ndim == 2:
-            matrix = arr
-        else:
-            raise ValueError("precipitation input must be 1-D or 2-D")
-        cols = [f"p{i+1}" for i in range(matrix.shape[1])]
-
-    if labels is not None:
-        if len(labels) != matrix.shape[1]:
-            raise ValueError("labels must match the number of precipitation columns")
-        cols = list(labels)
-
-    return matrix, cols
-
-
-def _aggregate(
-    p: np.ndarray,
-    q: np.ndarray,
-    wt: Optional[Sequence[float]],
-    agg: int,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-    """Aggregate time series by agg samples.
-
-    将时间序列按照 agg 长度聚合。降水累加，流量和权重取平均。
-    """
-    n = p.shape[0]
-    trimmed = n - (n % agg)
-    if trimmed == 0:
-        raise ValueError("time series shorter than aggregation window")
-
-    p_trim = p[:trimmed]
-    q_trim = q[:trimmed]
-
-    p_agg = p_trim.reshape(trimmed // agg, agg, p.shape[1]).sum(axis=1)
-    q_agg = q_trim.reshape(trimmed // agg, agg).mean(axis=1)
-
-    if wt is None:
-        wt_agg = None
-    else:
-        wt_arr = _convert_to_numpy_array(wt)[:trimmed]
-        wt_agg = wt_arr.reshape(trimmed // agg, agg).mean(axis=1)
-
-    return p_agg, q_agg, wt_agg
-
-
-def _apply_quantile_filter(q: np.ndarray, fq: float, window: int) -> np.ndarray:
-    """Apply a running quantile filter to discharge.
-
-    对流量序列应用滑动分位滤波，以去除季节性或趋势。
-    """
-    if fq <= 0.0:
-        return q
-    if fq >= 1.0:
-        raise ValueError("fq must be in [0, 1)")
-
-    series = pd.Series(q)
-    window = max(3, min(window, len(series)))
-    if fq == 0.5:
-        trend = series.rolling(window, center=True, min_periods=1).median()
-    else:
-        trend = series.rolling(window, center=True, min_periods=1).quantile(fq)
-    return (series - trend).to_numpy(dtype=float)
-
-
-def _build_design_matrix(
-    p: np.ndarray,
-    q: np.ndarray,
-    wt: np.ndarray,
-    m: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Construct the regression matrix with lags up to m.
-
-    根据最大时滞 m 构建设计矩阵，并删除包含缺测值的行。
-    """
-    n, k = p.shape
-    cols = k * (m + 1)
-    design = np.zeros((n, cols), dtype=float)
-
-    for lag in range(m + 1):
-        shifted = np.roll(p, shift=lag, axis=0)
-        shifted[:lag, :] = np.nan
-        design[:, lag * k : (lag + 1) * k] = shifted
-
-    valid = (~np.isnan(design).any(axis=1)) & (~np.isnan(q))
-    design = design[valid]
-    response = q[valid]
-    weights = wt[valid]
-
-    # Normalize weights to avoid numerical issues / 归一化权重
-    mean_w = weights.mean()
-    if not np.isfinite(mean_w) or mean_w <= 0:
-        weights = np.ones_like(weights)
-    else:
-        weights = weights / mean_w
-
-    return design, response, weights
-
-
-def _create_tikhonov_regularization_matrix(lag_count: int) -> np.ndarray:
-    """Construct a 2nd-order difference operator for Tikhonov smoothing.
-
-    构建用于 Tikhonov 平滑的二阶差分算子。
-    """
-    if lag_count <= 2:
-        return np.eye(lag_count, dtype=float)
-    L = np.zeros((lag_count - 2, lag_count), dtype=float)
-    for i in range(lag_count - 2):
-        L[i, i : i + 3] = np.array([1.0, -2.0, 1.0])
-    return L
-
-
-def _solve_rrd(
-    design: np.ndarray,
-    response: np.ndarray,
-    weights: np.ndarray,
-    nu: float,
-    m: int,
-    k: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Solve the weighted ridge regression for RRD coefficients.
-
-    求解加权岭回归。返回的系数以列主序排列：lag0 var1, lag0 var2, ...
-    """
-    W_sqrt = np.sqrt(weights)[:, None]
-    Xw = design * W_sqrt
-    yw = response * W_sqrt[:, 0]
-
-    beta_size = (m + 1) * k
-    XtX = Xw.T @ Xw
-    Xty = Xw.T @ yw
-
-    if nu > 0.0:
-        L = _create_tikhonov_regularization_matrix(m + 1)
-        L_big = np.kron(np.eye(k), L)
-        reg = nu * (L_big.T @ L_big)
-        XtX = XtX + reg
-
-    try:
-        beta = np.linalg.solve(XtX, Xty)
-    except np.linalg.LinAlgError as exc:
-        raise np.linalg.LinAlgError(
-            "Regression matrix is singular; consider increasing nu or reducing m"
-        ) from exc
-
-    fitted = design @ beta
-    residuals = response - fitted
-
-    dof = max(len(response) - beta_size, 1)
-    sigma2 = float((weights * residuals**2).sum() / dof)
-    try:
-        inv_xtx = np.linalg.inv(XtX)
-    except np.linalg.LinAlgError:
-        inv_xtx = np.linalg.pinv(XtX)
-    cov = inv_xtx * sigma2
-    stderr = np.sqrt(np.maximum(np.diag(cov), 0.0))
-
-    beta = beta.reshape(m + 1, k)
-    stderr = stderr.reshape(m + 1, k)
-
-    return beta, stderr, fitted, residuals
-
-
 def _solve_rrd_robust(
     design: np.ndarray,
     response: np.ndarray,
@@ -723,7 +549,7 @@ def _solve_rrd_robust(
     通过基于残差使用 Huber 权重迭代降低异常值的权重来实现鲁棒回归。
     """
     # Start with OLS solution
-    beta, stderr, fitted, residuals = _solve_rrd(design, response, weights, nu, m, k)
+    beta, stderr, fitted, residuals = solve_rrd(design, response, weights, nu, m, k)
 
     rob_weights = np.ones_like(weights)
 
@@ -749,7 +575,7 @@ def _solve_rrd_robust(
         combined_weights = weights * rob_weights
 
         # Re-solve with new weights
-        beta_new, stderr, fitted, residuals = _solve_rrd(
+        beta_new, stderr, fitted, residuals = solve_rrd(
             design, response, combined_weights, nu, m, k
         )
 
@@ -761,17 +587,6 @@ def _solve_rrd_robust(
             break
 
     return beta, stderr, fitted, residuals
-
-
-def _to_rrd_dataframe(arr: np.ndarray, labels: Sequence[str]) -> pd.DataFrame:
-    """Convert coefficient array to DataFrame with bilingual headers.
-
-    将系数数组转换为带有双语标题的 DataFrame。
-    """
-    data = {label: arr[:, i] for i, label in enumerate(labels)}
-    df = pd.DataFrame(data)
-    df.index.name = "lag"
-    return df
 
 
 def _broken_stick(

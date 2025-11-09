@@ -38,6 +38,8 @@ dev = [
     "pytest>=7.0",
     "black>=22.0",
     "flake8>=4.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
 ]
 
 [project.urls]
@@ -54,6 +56,26 @@ where = ["src"]
 [tool.black]
 line-length = 88
 target-version = ['py39']
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "ANN",
+    "RUF",
+]
+
+[tool.mypy]
+python_version = "3.9"
+packages = ["erra"]
+disallow_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

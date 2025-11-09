@@ -82,7 +82,7 @@ def create_xprime_matrix(
     knot_values : np.ndarray
         Actual knot values used (including min and max)
         实际使用的节点值（包括最小值和最大值）
-    seg_wtd_meanx : np.ndarray
+    segment_weighted_mean_precip : np.ndarray
         Segment-weighted mean precipitation in each interval
         每个区间中段加权平均降水
     """
@@ -156,7 +156,7 @@ def create_xprime_matrix(
     xprime = np.zeros((n_timesteps, n_drivers * n_segments))
 
     # Calculate segment-weighted means
-    seg_wtd_meanx = np.zeros((n_segments, n_drivers))
+    segment_weighted_mean_precip = np.zeros((n_segments, n_drivers))
 
     for driver_idx in range(n_drivers):
         p_col = p[:, driver_idx]
@@ -179,19 +179,19 @@ def create_xprime_matrix(
             if np.any(in_segment):
                 # Weight by precipitation intensity
                 p_in_seg = p_col[in_segment]
-                seg_wtd_meanx[seg_idx, driver_idx] = np.sum(p_in_seg**2) / np.sum(
+                segment_weighted_mean_precip[seg_idx, driver_idx] = np.sum(p_in_seg**2) / np.sum(
                     p_in_seg
                 )
             else:
-                seg_wtd_meanx[seg_idx, driver_idx] = (k_lower + k_upper) / 2
+                segment_weighted_mean_precip[seg_idx, driver_idx] = (k_lower + k_upper) / 2
 
-    return xprime, knot_values, seg_wtd_meanx
+    return xprime, knot_values, segment_weighted_mean_precip
 
 
 def betaprime_to_nrf(
     betaprime: np.ndarray,
     knot_values: np.ndarray,
-    seg_wtd_meanx: np.ndarray,
+    segment_weighted_mean_precip: np.ndarray,
     n_drivers: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Convert β' (beta-prime) coefficients to NRF (Nonlinear Response Functions).
@@ -220,7 +220,7 @@ def betaprime_to_nrf(
     knot_values : np.ndarray
         Knot values including min and max, shape (n_knots+2, n_drivers)
         包括最小值和最大值的节点值，形状 (n_knots+2, n_drivers)
-    seg_wtd_meanx : np.ndarray
+    segment_weighted_mean_precip : np.ndarray
         Segment-weighted mean precipitation, shape (n_segments, n_drivers)
         段加权平均降水，形状 (n_segments, n_drivers)
     n_drivers : int
@@ -268,7 +268,7 @@ def betaprime_to_nrf(
         bp_end = (driver_idx + 1) * n_segments
 
         # Weight by segment-weighted mean precipitation
-        weights = seg_wtd_meanx[:, driver_idx]
+        weights = segment_weighted_mean_precip[:, driver_idx]
         weights = weights / (np.sum(weights) + _EPSILON_WEIGHT)  # Normalize
 
         for lag_idx in range(m_plus_1):

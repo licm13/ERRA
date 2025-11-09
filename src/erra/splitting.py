@@ -132,7 +132,7 @@ def make_split_sets(
 
     # Calculate breakpoints and create bin assignments
     bin_assignments = np.zeros((n, n_crit), dtype=int)
-    breakpt_values = []  # Store actual breakpoint values used
+    breakpoint_values = []  # Store actual breakpoint values used
 
     for i in range(n_crit):
         crit_values = lagged_crit[i]
@@ -148,20 +148,20 @@ def make_split_sets(
                 # This is complex - for simplicity, we'll use global percentiles
                 # A full implementation would iterate through all previous bin combinations
                 valid_values = crit_values[valid_mask]
-                bp_vals = np.percentile(valid_values, bp_list)
+                breakpoint_values_current = np.percentile(valid_values, bp_list)
             else:
                 # Global percentiles
                 valid_values = crit_values[valid_mask]
-                bp_vals = np.percentile(valid_values, bp_list)
+                breakpoint_values_current = np.percentile(valid_values, bp_list)
 
         else:
             # Use fixed breakpoint values
-            bp_vals = np.array(bp_list, dtype=float)
+            breakpoint_values_current = np.array(bp_list, dtype=float)
 
-        breakpt_values.append(bp_vals)
+        breakpoint_values.append(breakpoint_values_current)
 
         # Assign bins
-        bins = np.digitize(crit_values, bp_vals)
+        bins = np.digitize(crit_values, breakpoint_values_current)
         bin_assignments[:, i] = bins
 
     # Create unique bin combinations and labels
@@ -189,16 +189,16 @@ def make_split_sets(
             label_parts.append(f"{crit_label[i]}_{bin_num}")
 
             # Record criteria bounds for this bin
-            bp_vals = breakpt_values[i]
+            breakpoint_values_current = breakpoint_values[i]
             if bin_num == 0:
                 lower = -np.inf
-                upper = bp_vals[0] if len(bp_vals) > 0 else np.inf
-            elif bin_num == len(bp_vals):
-                lower = bp_vals[-1]
+                upper = breakpoint_values_current[0] if len(breakpoint_values_current) > 0 else np.inf
+            elif bin_num == len(breakpoint_values_current):
+                lower = breakpoint_values_current[-1]
                 upper = np.inf
             else:
-                lower = bp_vals[bin_num - 1]
-                upper = bp_vals[bin_num]
+                lower = breakpoint_values_current[bin_num - 1]
+                upper = breakpoint_values_current[bin_num]
 
             criteria_row[f"{crit_label[i]}_lower"] = lower
             criteria_row[f"{crit_label[i]}_upper"] = upper

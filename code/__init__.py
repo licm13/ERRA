@@ -8,6 +8,7 @@ Distributions (RRDs) and related diagnostics, enabling integration into
 modern Python-based hydrologic analyses.
 """
 
-from .erra import ERRAResult, erra, plot_erra_results
+from .erra import ERRAResult, erra
+from erra.utils import plot_erra_results
 
 __all__ = ["ERRAResult", "erra", "plot_erra_results"]
