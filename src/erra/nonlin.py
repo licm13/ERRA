@@ -38,11 +38,7 @@ def _percentiles_from_sorted(sorted_values: np.ndarray, percentiles: np.ndarray)
         return np.full(percentiles.shape, sorted_values[0], dtype=float)
 
     ranks = percentiles / 100.0 * (sorted_values.size - 1)
-    lower_idx = np.floor(ranks).astype(int)
-    upper_idx = np.ceil(ranks).astype(int)
-    frac = ranks - lower_idx
-
-    return (1.0 - frac) * sorted_values[lower_idx] + frac * sorted_values[upper_idx]
+    return np.interp(ranks, np.arange(sorted_values.size), sorted_values)
 
 
 def _values_from_cumulative(
