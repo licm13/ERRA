@@ -30,12 +30,12 @@ from typing import Dict, Iterable, List
 import numpy as np
 import pandas as pd
 
-if __package__ is None or __package__ == "":
-    # Allow running ``python climate_response_case_studies.py`` from repo root
+# Prefer the installed/package import; fall back to adding repo root for scripts
+try:
+    from erra import ERRAResult, erra
+except ModuleNotFoundError:
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from erra import ERRAResult, erra
-else:
-    from ..erra import ERRAResult, erra
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "regional_climate_responses.csv"
 DEFAULT_FU_OMEGA = 2.6  # Typical Fu-parameter for Budyko curves in literature

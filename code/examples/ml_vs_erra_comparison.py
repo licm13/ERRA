@@ -21,15 +21,20 @@ from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-if __package__ is None or __package__ == "":
+# Prefer installed/package imports; fall back to local paths when executed as a script
+try:
+    from erra import erra
+except ModuleNotFoundError:
     examples_dir = Path(__file__).resolve().parent
-    sys.path.append(str(examples_dir))
     sys.path.append(str(examples_dir.parent))
     from erra import erra
+
+try:
+    from examples import climate_response_case_studies as crcs
+except ModuleNotFoundError:
+    # Support running as ``python ml_vs_erra_comparison.py``
+    sys.path.append(str(Path(__file__).resolve().parent))
     import climate_response_case_studies as crcs
-else:
-    from ..erra import erra
-    from . import climate_response_case_studies as crcs
 
 
 @dataclass
